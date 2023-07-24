@@ -36,7 +36,7 @@ fn parse_angle(input: &[u8]) -> IResult<&[u8], f64> {
     Ok((input, angle))
 }
 
-fn parse_dted_header(input: &[u8]) -> IResult<&[u8], DtedHeader> {
+fn parse_user_header_label(input: &[u8]) -> IResult<&[u8], DtedHeader> {
     let (input, _) = tag("UHL1")(input)?;
     let (input, origin_lon) =
         verify(parse_angle, |lon| (-180.0..180.0).contains(lon)).parse(input)?;
@@ -100,7 +100,6 @@ fn parse_dted_data<'a>(header: &DtedHeader, input: &'a [u8]) -> IResult<&'a [u8]
 
     let mut data = Array2::default((n_lats, n_lons));
     for mut col in data.columns_mut() {
-        // TODO: Make sure input is reassigning correctly
         let (rest, elevations) = parse_dted_record(n_lats, input)?;
         input = rest;
         col.assign(&elevations);
@@ -110,7 +109,7 @@ fn parse_dted_data<'a>(header: &DtedHeader, input: &'a [u8]) -> IResult<&'a [u8]
 }
 
 pub fn parse_dted_tile(input: &[u8]) -> IResult<&[u8], DtedTile> {
-    let (input, header) = parse_dted_header(input)?;
+    let (input, header) = parse_user_header_label(input)?;
     // Skip DSI [648] and ACC [2700] fields -> 3348 bytes
     let (input, _) = take(3348u16)(input)?;
     let (input, data) = parse_dted_data(&header, input)?;

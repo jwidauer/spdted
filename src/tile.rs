@@ -10,6 +10,7 @@ use std::path::Path;
 // pretty simple. The spec is available here:
 // https://geoservice.dlr.de/web/dataguide/srtm/pdfs/SRTM-XSAR-DEM-DTED-1.1.pdf
 
+#[derive(Debug, Clone)]
 pub struct DtedHeader {
     pub(crate) origin_sw: Coordinate2d,
     pub(crate) num_lat_points: usize,
@@ -30,6 +31,7 @@ impl DtedHeader {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct DtedTile {
     pub(crate) header: DtedHeader,
     pub(crate) data: Array2<i16>,
@@ -82,10 +84,10 @@ impl DtedTile {
             return None;
         }
 
-        let lon_index = (coord.lon_deg() - self.min_lon_deg()) * self.header.num_lon() as f64;
-        let lat_index = (coord.lat_deg() - self.min_lat_deg()) * self.header.num_lat() as f64;
-        let lon_index = lon_index as usize;
-        let lat_index = lat_index as usize;
+        let lat_index = (coord.lat_deg() - self.min_lat_deg()) * (self.header.num_lat() - 1) as f64;
+        let lon_index = (coord.lon_deg() - self.min_lon_deg()) * (self.header.num_lon() - 1) as f64;
+        let lat_index = lat_index.round() as usize;
+        let lon_index = lon_index.round() as usize;
         Some(self.data[[lat_index, lon_index]])
     }
 }
@@ -103,8 +105,8 @@ mod test {
 
         assert_eq!(tile.header.origin_sw.lat_deg(), 47.0);
         assert_eq!(tile.header.origin_sw.lon_deg(), 8.0);
-        assert_eq!(tile.header.num_lat_points, 3601);
-        assert_eq!(tile.header.num_lon_points, 3601);
+        assert_eq!(tile.header.num_lat(), 3601);
+        assert_eq!(tile.header.num_lon(), 3601);
 
         let coordinates = vec![
             Coordinate2d::from_degrees(47.356418477, 8.5189232237)?,
