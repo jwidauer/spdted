@@ -17,3 +17,6 @@ criterion = "0.5.1"
 [[bench]]
 name = "parse_dted"
 harness = false
+
+[profile.bench]
+debug = true

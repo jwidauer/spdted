@@ -1,7 +1,7 @@
 use super::coordinate_2d::Coordinate2d;
 use super::tile::{DtedHeader, DtedTile};
 
-use ndarray::{Array1, Array2};
+use ndarray::{Array1, Array2, ShapeBuilder};
 use nom::{
     bytes::complete::{tag, take},
     character::complete::{one_of, u16},
@@ -22,6 +22,7 @@ pub enum ParseError {
 }
 
 // Parse an angle in the format DDDMMSSH
+#[inline(always)]
 fn parse_angle(input: &[u8]) -> IResult<&[u8], f64> {
     let (input, degrees) = take(3u8).and_then(u16).parse(input)?;
     // According to the spec, the MMSS part is always 0, so we ignore it
@@ -36,6 +37,7 @@ fn parse_angle(input: &[u8]) -> IResult<&[u8], f64> {
     Ok((input, angle))
 }
 
+#[inline(always)]
 fn parse_user_header_label(input: &[u8]) -> IResult<&[u8], DtedHeader> {
     let (input, _) = tag("UHL1")(input)?;
     let (input, origin_lon) =
@@ -62,11 +64,13 @@ fn parse_user_header_label(input: &[u8]) -> IResult<&[u8], DtedHeader> {
 }
 
 // Convert a signed magnitude 16 bit integer to a two's complement 16 bit integer
+#[inline(always)]
 fn to_i16(x: u16) -> i16 {
     let mask = x as i16 >> 15;
     (!mask & x as i16) | (((x & (1 << 15)) as i16 - x as i16) & mask)
 }
 
+#[inline(always)]
 fn parse_dted_record(n_lats: usize, input: &[u8]) -> IResult<&[u8], Array1<i16>> {
     let header_parser = take(8u8);
 
@@ -92,22 +96,25 @@ fn parse_dted_record(n_lats: usize, input: &[u8]) -> IResult<&[u8], Array1<i16>>
     .parse(input)
 }
 
+#[inline(always)]
 fn parse_dted_data<'a>(header: &DtedHeader, input: &'a [u8]) -> IResult<&'a [u8], Array2<i16>> {
     let n_lats = header.num_lat();
     let n_lons = header.num_lon();
 
     let mut input = input;
 
-    let mut data = Array2::default((n_lats, n_lons));
-    for mut col in data.columns_mut() {
+    let mut data = Array2::uninit((n_lats, n_lons).f());
+    for col in data.columns_mut() {
         let (rest, elevations) = parse_dted_record(n_lats, input)?;
         input = rest;
-        col.assign(&elevations);
+        elevations.move_into_uninit(col);
     }
+    let data = unsafe { data.assume_init() };
 
     Ok((input, data))
 }
 
+#[inline(always)]
 pub fn parse_dted_tile(input: &[u8]) -> IResult<&[u8], DtedTile> {
     let (input, header) = parse_user_header_label(input)?;
     // Skip DSI [648] and ACC [2700] fields -> 3348 bytes

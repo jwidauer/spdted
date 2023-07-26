@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::Path;
 
-fn criterion_benchmark(c: &mut Criterion) {
+fn benchmark(c: &mut Criterion) {
     let resource_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources");
     let path = resource_dir.join("n47.dt2");
     let file = File::open(path).unwrap();
@@ -16,5 +16,9 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, criterion_benchmark);
+criterion_group! {
+    name = benches;
+    config = Criterion::default().sample_size(200).measurement_time(std::time::Duration::from_secs(10)).without_plots();
+    targets = benchmark
+}
 criterion_main!(benches);
