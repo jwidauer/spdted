@@ -6,7 +6,7 @@ use nom::{
     bytes::complete::{tag, take},
     character::complete::{one_of, u16},
     combinator::{consumed, verify},
-    multi::count,
+    multi::fill,
     number::complete::{be_u16, be_u32},
     IResult, Parser,
 };
@@ -72,13 +72,14 @@ fn to_i16(x: u16) -> i16 {
 
 #[inline(always)]
 fn parse_dted_record(n_lats: usize, input: &[u8]) -> IResult<&[u8], Array1<i16>> {
-    let header_parser = take(8u8);
+    // let header_parser = take(8u8);
 
-    let n_bytes = 2 * n_lats;
-    let height_parser = take(2u8).and_then(be_u16).map(to_i16);
-    let column_parser = take(n_bytes).and_then(count(height_parser, n_lats));
+    let height_parser = |i| take(2u8).and_then(be_u16).map(to_i16).parse(i);
+    let mut elevations = vec![0i16; n_lats];
+    let column_parser = take(2 * n_lats).and_then(fill(height_parser, &mut elevations[..]));
 
-    let record_parser = header_parser.and(column_parser);
+    // Skip the first 8 bytes of the record (record header)
+    let record_parser = take(8u8).and(column_parser);
     let record_parser = consumed(record_parser).map(|(data, (_, elevations)): (&[u8], _)| {
         let checksum: u32 = data.iter().fold(0u32, |acc, &x| acc + x as u32);
         (checksum, elevations)
@@ -88,12 +89,12 @@ fn parse_dted_record(n_lats: usize, input: &[u8]) -> IResult<&[u8], Array1<i16>>
 
     let total_record_parser = record_parser.and(checksum_parser);
 
-    verify(
+    let res = verify(
         total_record_parser,
         |&((expected_checksum, _), checksum)| expected_checksum == checksum,
     )
-    .map(|((_, elevations), _)| Array1::from_vec(elevations))
-    .parse(input)
+    .parse(input);
+    res.map(move |(input, _)| (input, Array1::from_vec(elevations)))
 }
 
 #[inline(always)]

@@ -18,7 +18,11 @@ fn benchmark(c: &mut Criterion) {
 
 criterion_group! {
     name = benches;
-    config = Criterion::default().sample_size(200).measurement_time(std::time::Duration::from_secs(10)).without_plots();
+    config = Criterion::default()
+        .sample_size(3000)
+        .nresamples(600_000)
+        .measurement_time(std::time::Duration::from_secs(15))
+        .without_plots();
     targets = benchmark
 }
 criterion_main!(benches);
