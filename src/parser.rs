@@ -1,13 +1,12 @@
 use super::coordinate_2d::Coordinate2d;
 use super::tile::{DtedHeader, DtedTile};
 
-use ndarray::{Array1, Array2, ShapeBuilder};
+use ndarray::{Array2, ShapeBuilder};
 use nom::{
     bytes::complete::{tag, take},
     character::complete::{one_of, u16},
-    combinator::{consumed, verify},
-    multi::fill,
-    number::complete::{be_u16, be_u32},
+    combinator::verify,
+    number::complete::be_u32,
     IResult, Parser,
 };
 use std::io;
@@ -63,38 +62,43 @@ fn parse_user_header_label(input: &[u8]) -> IResult<&[u8], DtedHeader> {
     Ok((input, header))
 }
 
-// Convert a signed magnitude 16 bit integer to a two's complement 16 bit integer
+// Convert two big endian signed magnitude bytes to a two's complement 16 bit integer
 #[inline(always)]
-fn to_i16(x: u16) -> i16 {
-    let mask = x as i16 >> 15;
-    (!mask & x as i16) | (((x & (1 << 15)) as i16 - x as i16) & mask)
+fn parse_height(input: &[u8]) -> i16 {
+    let x = ((input[0] as u16) << 8) | input[1] as u16;
+    let x = x as i16;
+    let mask = x >> 15;
+    (!mask & x) | (mask & ((x & (1 << 15)) - x))
 }
 
 #[inline(always)]
-fn parse_dted_record(n_lats: usize, input: &[u8]) -> IResult<&[u8], Array1<i16>> {
-    // let header_parser = take(8u8);
+fn parse_dted_record_into<'a>(
+    input: &'a [u8],
+    buf: &mut [i16],
+) -> Result<(), nom::Err<nom::error::Error<&'a [u8]>>> {
+    const HEADER_SIZE: usize = 8;
+    const CHECKSUM_SIZE: usize = 4;
+    let record_size = buf.len() * 2 + HEADER_SIZE;
+    let total_record_size = record_size + CHECKSUM_SIZE;
 
-    let height_parser = |i| take(2u8).and_then(be_u16).map(to_i16).parse(i);
-    let mut elevations = vec![0i16; n_lats];
-    let column_parser = take(2 * n_lats).and_then(fill(height_parser, &mut elevations[..]));
+    let expected_checksum = input[..record_size]
+        .iter()
+        .fold(0u32, |acc, &x| acc + x as u32);
 
-    // Skip the first 8 bytes of the record (record header)
-    let record_parser = take(8u8).and(column_parser);
-    let record_parser = consumed(record_parser).map(|(data, (_, elevations)): (&[u8], _)| {
-        let checksum: u32 = data.iter().fold(0u32, |acc, &x| acc + x as u32);
-        (checksum, elevations)
-    });
+    let checksum = be_u32(&input[record_size..total_record_size]).map(|(_, checksum)| checksum)?;
+    if expected_checksum != checksum {
+        return Err(nom::Err::Error(nom::error::make_error(
+            input,
+            nom::error::ErrorKind::Verify,
+        )));
+    }
 
-    let checksum_parser = take(4u8).and_then(be_u32);
+    let input = &input[HEADER_SIZE..record_size];
+    for (elem, bytes) in buf.iter_mut().zip(input.chunks_exact(2)) {
+        *elem = parse_height(bytes);
+    }
 
-    let total_record_parser = record_parser.and(checksum_parser);
-
-    let res = verify(
-        total_record_parser,
-        |&((expected_checksum, _), checksum)| expected_checksum == checksum,
-    )
-    .parse(input);
-    res.map(move |(input, _)| (input, Array1::from_vec(elevations)))
+    Ok(())
 }
 
 #[inline(always)]
@@ -102,15 +106,21 @@ fn parse_dted_data<'a>(header: &DtedHeader, input: &'a [u8]) -> IResult<&'a [u8]
     let n_lats = header.num_lat();
     let n_lons = header.num_lon();
 
-    let mut input = input;
+    const RECORD_HEADER_SIZE: usize = 8;
+    const RECORD_CHECKSUM_SIZE: usize = 4;
+    let record_size = n_lats * 2 + RECORD_HEADER_SIZE + RECORD_CHECKSUM_SIZE;
 
-    let mut data = Array2::uninit((n_lats, n_lons).f());
-    for col in data.columns_mut() {
-        let (rest, elevations) = parse_dted_record(n_lats, input)?;
-        input = rest;
-        elevations.move_into_uninit(col);
+    let mut data = vec![0i16; n_lats * n_lons];
+    for (col, input) in data
+        .chunks_exact_mut(n_lats)
+        .zip(input.chunks_exact(record_size))
+    {
+        parse_dted_record_into(input, col)?;
     }
-    let data = unsafe { data.assume_init() };
+
+    let data = Array2::from_shape_vec((n_lats, n_lons).f(), data).unwrap();
+
+    let input = &input[record_size * n_lons..];
 
     Ok((input, data))
 }
@@ -237,35 +247,35 @@ mod test {
     }
 
     #[test]
-    fn test_to_i16() {
-        let x = 0b0000000000000000;
-        assert_eq!(super::to_i16(x), 0);
+    fn test_height_parser() {
+        let x = [0b00000000, 0b00000000];
+        assert_eq!(super::parse_height(&x), 0);
 
-        let x = 0b0000000000000001;
-        assert_eq!(super::to_i16(x), 1);
+        let x = [0b00000000, 0b00000001];
+        assert_eq!(super::parse_height(&x), 1);
 
-        let x = 0b0000000000000010;
-        assert_eq!(super::to_i16(x), 2);
+        let x = [0b00000000, 0b00000010];
+        assert_eq!(super::parse_height(&x), 2);
 
-        let x = 0b0010000000000000;
-        assert_eq!(super::to_i16(x), 8192);
+        let x = [0b00100000, 0b00000000];
+        assert_eq!(super::parse_height(&x), 8192);
 
-        let x = 0b0100000000000000;
-        assert_eq!(super::to_i16(x), 16384);
+        let x = [0b01000000, 0b00000000];
+        assert_eq!(super::parse_height(&x), 16384);
 
-        let x = 0b1000000000000000;
-        assert_eq!(super::to_i16(x), 0);
+        let x = [0b10000000, 0b00000000];
+        assert_eq!(super::parse_height(&x), 0);
 
-        let x = 0b1000000000000001;
-        assert_eq!(super::to_i16(x), -1);
+        let x = [0b10000000, 0b00000001];
+        assert_eq!(super::parse_height(&x), -1);
 
-        let x = 0b1000000000000010;
-        assert_eq!(super::to_i16(x), -2);
+        let x = [0b10000000, 0b00000010];
+        assert_eq!(super::parse_height(&x), -2);
 
-        let x = 0b1010000000000000;
-        assert_eq!(super::to_i16(x), -8192);
+        let x = [0b10100000, 0b00000000];
+        assert_eq!(super::parse_height(&x), -8192);
 
-        let x = 0b1100000000000000;
-        assert_eq!(super::to_i16(x), -16384);
+        let x = [0b11000000, 0b00000000];
+        assert_eq!(super::parse_height(&x), -16384);
     }
 }
