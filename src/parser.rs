@@ -10,6 +10,7 @@ use nom::{
     IResult, Parser,
 };
 use std::io;
+use std::mem::MaybeUninit;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -74,7 +75,7 @@ fn parse_height(input: &[u8]) -> i16 {
 #[inline(always)]
 fn parse_dted_record_into<'a>(
     input: &'a [u8],
-    buf: &mut [i16],
+    buf: &mut [MaybeUninit<i16>],
 ) -> Result<(), nom::Err<nom::error::Error<&'a [u8]>>> {
     const HEADER_SIZE: usize = 8;
     const CHECKSUM_SIZE: usize = 4;
@@ -95,7 +96,7 @@ fn parse_dted_record_into<'a>(
 
     let input = &input[HEADER_SIZE..record_size];
     for (elem, bytes) in buf.iter_mut().zip(input.chunks_exact(2)) {
-        *elem = parse_height(bytes);
+        elem.write(parse_height(bytes));
     }
 
     Ok(())
@@ -105,17 +106,33 @@ fn parse_dted_record_into<'a>(
 fn parse_dted_data<'a>(header: &DtedHeader, input: &'a [u8]) -> IResult<&'a [u8], Array2<i16>> {
     let n_lats = header.num_lat();
     let n_lons = header.num_lon();
+    let n_elevations = n_lats * n_lons;
 
     const RECORD_HEADER_SIZE: usize = 8;
     const RECORD_CHECKSUM_SIZE: usize = 4;
     let record_size = n_lats * 2 + RECORD_HEADER_SIZE + RECORD_CHECKSUM_SIZE;
+    let required_input_size = record_size * n_lons;
 
-    let mut data = vec![0i16; n_lats * n_lons];
+    if input.len() < required_input_size {
+        return Err(nom::Err::Error(nom::error::make_error(
+            input,
+            nom::error::ErrorKind::Eof,
+        )));
+    }
+
+    let mut data: Vec<i16> = Vec::with_capacity(n_elevations);
     for (col, input) in data
+        .spare_capacity_mut()
         .chunks_exact_mut(n_lats)
         .zip(input.chunks_exact(record_size))
     {
+        // TODO: check what happens if this fails
         parse_dted_record_into(input, col)?;
+    }
+
+    // SAFETY: we just wrote `n_elevations` elements into the vector
+    unsafe {
+        data.set_len(n_elevations);
     }
 
     let data = Array2::from_shape_vec((n_lats, n_lons).f(), data).unwrap();
