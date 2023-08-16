@@ -82,6 +82,13 @@ fn parse_dted_record_into<'a>(
     let record_size = buf.len() * 2 + HEADER_SIZE;
     let total_record_size = record_size + CHECKSUM_SIZE;
 
+    if (isize::MAX as usize) < total_record_size {
+        return Err(nom::Err::Error(nom::error::make_error(
+            input,
+            nom::error::ErrorKind::TooLarge,
+        )));
+    }
+
     let expected_checksum = input[..record_size]
         .iter()
         .fold(0u32, |acc, &x| acc + x as u32);
@@ -108,10 +115,20 @@ fn parse_dted_data<'a>(header: &DtedHeader, input: &'a [u8]) -> IResult<&'a [u8]
     let n_lons = header.num_lon();
     let n_elevations = n_lats * n_lons;
 
+    // assert_ne!(n_lats, 0);
+    // assert_ne!(n_lons, 0);
+    // assert!(n_elevations < isize::MAX as usize);
+
     const RECORD_HEADER_SIZE: usize = 8;
+    let record_size = n_lats * 2 + RECORD_HEADER_SIZE;
     const RECORD_CHECKSUM_SIZE: usize = 4;
-    let record_size = n_lats * 2 + RECORD_HEADER_SIZE + RECORD_CHECKSUM_SIZE;
-    let required_input_size = record_size * n_lons;
+    let total_record_size = record_size + RECORD_CHECKSUM_SIZE;
+    let required_input_size = total_record_size * n_lons;
+
+    // assert!(record_size < total_record_size);
+    // assert!(total_record_size < required_input_size);
+    // assert!(total_record_size < isize::MAX as usize);
+    // assert!(required_input_size < isize::MAX as usize);
 
     if input.len() < required_input_size {
         return Err(nom::Err::Error(nom::error::make_error(
@@ -124,10 +141,27 @@ fn parse_dted_data<'a>(header: &DtedHeader, input: &'a [u8]) -> IResult<&'a [u8]
     for (col, input) in data
         .spare_capacity_mut()
         .chunks_exact_mut(n_lats)
-        .zip(input.chunks_exact(record_size))
+        .zip(input.chunks_exact(total_record_size))
     {
         // TODO: check what happens if this fails
-        parse_dted_record_into(input, col)?;
+        let expected_checksum = input[..record_size]
+            .iter()
+            .fold(0u32, |acc, &x| acc + x as u32);
+
+        let checksum =
+            be_u32(&input[record_size..total_record_size]).map(|(_, checksum)| checksum)?;
+
+        if expected_checksum != checksum {
+            return Err(nom::Err::Error(nom::error::make_error(
+                input,
+                nom::error::ErrorKind::Verify,
+            )));
+        }
+
+        let input = &input[RECORD_HEADER_SIZE..record_size];
+        for (elem, bytes) in col.iter_mut().zip(input.chunks_exact(2)) {
+            elem.write(parse_height(bytes));
+        }
     }
 
     // SAFETY: we just wrote `n_elevations` elements into the vector

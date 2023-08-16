@@ -2,8 +2,6 @@ use super::coordinate_2d::Coordinate2d;
 use super::parser::{parse_dted_tile, ParseError};
 
 use ndarray::Array2;
-use std::fs::File;
-use std::io::{BufReader, Read};
 use std::path::Path;
 
 // DTED is a format for storing elevation data. It's a binary format, but it's
@@ -45,11 +43,8 @@ impl DtedTile {
     }
 
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<DtedTile, ParseError> {
-        let file = File::open(path).map_err(ParseError::Io)?;
-        let mut reader = BufReader::new(file);
-        let mut buffer = Vec::new();
-        reader.read_to_end(&mut buffer).map_err(ParseError::Io)?;
-        Self::from_bytes(&buffer)
+        let data = std::fs::read(path).map_err(ParseError::Io)?;
+        Self::from_bytes(&data)
     }
 
     pub fn header(&self) -> &DtedHeader {
