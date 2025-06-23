@@ -103,14 +103,14 @@ mod test {
         assert_eq!(tile.header.num_lat(), 3601);
         assert_eq!(tile.header.num_lon(), 3601);
 
-        let coordinates = vec![
+        let coordinates = [
             Coordinate2d::from_degrees(47.356418477, 8.5189232237)?,
             Coordinate2d::from_degrees(47.349792968, 8.4909410835)?,
             Coordinate2d::from_degrees(47.164800109, 8.6838999052)?,
             Coordinate2d::from_degrees(47.310359476, 8.9664085558)?,
         ];
 
-        let elevations = vec![421.0, 871.0, 1116.0, 857.0];
+        let elevations = [421.0, 871.0, 1116.0, 857.0];
 
         for (coord, elevation) in coordinates.iter().zip(elevations.iter()) {
             assert_eq!(tile.elevation_m(*coord).unwrap(), *elevation as i16);
