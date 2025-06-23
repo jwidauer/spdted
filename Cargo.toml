@@ -5,15 +5,26 @@ edition = "2021"
 
 
 [dependencies]
-ndarray = "0.15.6"
-nom = "7.1.3"
-rayon = "1.7.0"
-thiserror = "1.0.40"
+ndarray = "0.16.1"
+nom = "8.0.0"
+rayon = "1.10.0"
+thiserror = "2.0.12"
+clap = { version = "4.5.40", features = ["derive"], optional = true }
+dhat = { version = "0.3.3", optional = true }
 
 [dev-dependencies]
-anyhow = "1.0.72"
-criterion = "0.5.1"
+anyhow = "1.0.98"
+criterion = "0.6.0"
 iai = { git = "https://github.com/sigaloid/iai", rev = "6c83e942" }
+
+[features]
+exec = ["dep:clap"]
+dhat-heap = ["dep:dhat"]
+
+[[bin]]
+name = "spdted"
+path = "src/main.rs"
+required-features = ["exec"]
 
 [[bench]]
 name = "parse_dted"
